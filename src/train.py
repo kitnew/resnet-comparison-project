@@ -30,6 +30,8 @@ def train_model(model, train_loader, val_loader, device, visualize=False, save_m
 
     for epoch in range(90):
         model.train()
+        current_loss = 0
+        current_acc = 0
         for images, labels in tqdm.tqdm(train_loader, desc=f"Training Epoch {epoch}"):
             images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
@@ -52,6 +54,8 @@ def train_model(model, train_loader, val_loader, device, visualize=False, save_m
         lr_scheduler.step()
 
         model.eval()
+        current_val_loss = 0
+        current_val_acc = 0
         for images, labels in tqdm.tqdm(val_loader, desc=f"Validation Epoch {epoch}"):
             images, labels = images.to(device), labels.to(device)
             outputs = model(images)
