@@ -32,7 +32,7 @@ class ImageNetDataset(Dataset):
             image = self.transform(image)
         return image, label
 
-def create_data_loaders(batch_size=32, num_workers=4):
+def create_data_loaders(batch_size=128, num_workers=8):
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
     

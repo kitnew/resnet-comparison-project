@@ -1,4 +1,5 @@
 from .model import ResNet
+import torch
 
 def resnet101(pretrained=False, **kwargs):
     """
@@ -6,7 +7,7 @@ def resnet101(pretrained=False, **kwargs):
     """
     model = ResNet("resnet101", [3, 4, 23, 3], **kwargs)
     if pretrained:
-        raise NotImplementedError("Pretrained weights loading not implemented")
+        model.load_state_dict(torch.load("resnet101.pth"))
     return model
 
 
@@ -16,5 +17,5 @@ def resnet152(pretrained=False, **kwargs):
     """
     model = ResNet("resnet152", [3, 8, 36, 3], **kwargs)
     if pretrained:
-        raise NotImplementedError("Pretrained weights loading not implemented")
+        model.load_state_dict(torch.load("resnet152.pth"))
     return model

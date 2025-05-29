@@ -1,5 +1,9 @@
 import torch
 import torch.nn as nn
+from captum.attr import LayerGradCam
+import torchvision.transforms.functional as TF
+from torch.utils.tensorboard import SummaryWriter
+
 from models.resnet import resnet101, resnet152
 from models.model import ResNet
 from utils.data_loader import create_data_loaders
@@ -10,16 +14,34 @@ import os
 import time
 import tqdm
 import logging
+import matplotlib.pyplot as plt
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 results_dir = os.path.join(project_dir, "results")
+checkpoints_dir = os.path.join(results_dir, "checkpoints")
+logs_dir = os.path.join(results_dir, "logs")
+figures_dir = os.path.join(results_dir, "figures")
+gradcam_dir = os.path.join(figures_dir, "gradcam")
 start_time = time.strftime("%Y-%m-%d_%H-%M-%S")
+
+writer = SummaryWriter(log_dir=str(logs_dir))
 
 train_loader, val_loader, test_loader = create_data_loaders()
 model: ResNet = None
+
+def save_cam(model, img, label, epoch, folder):
+    cam = LayerGradCam(model, model.layer4[-1].conv3)
+    attr = cam.attribute(img.unsqueeze(0), target=label)
+    heat = attr.squeeze(0).mean(0)
+    heat = TF.resize(heat.unsqueeze(0), [224, 224]).squeeze()
+    plt.imshow(heat.detach().cpu(), cmap='jet')
+    fname = folder / f"cam_epoch{epoch}.png"
+    plt.axis("off"); plt.savefig(fname, bbox_inches='tight'); plt.close()
+    writer.add_image("GradCAM", heat.unsqueeze(0), epoch, dataformats='CHW')
 
 def train_model(model, train_loader, val_loader, device, visualize=False, save_model=False):
     model.to(device)
@@ -47,10 +69,6 @@ def train_model(model, train_loader, val_loader, device, visualize=False, save_m
         train_acc = current_acc / len(train_loader.dataset)
         lr = optimizer.param_groups[0]["lr"]
 
-        logger.info(f"Epoch {epoch}, Train Loss: {train_loss:.4f}, Train Accuracy: {train_acc:.4f}, LR: {lr:.6f}")
-        log_train(train_loss, train_acc, lr)
-
-
         lr_scheduler.step()
 
         model.eval()
@@ -67,8 +85,30 @@ def train_model(model, train_loader, val_loader, device, visualize=False, save_m
         val_loss = current_val_loss / len(val_loader)
         val_acc = current_val_acc / len(val_loader.dataset)
 
+        logger.info(f"Epoch {epoch}, Train Loss: {train_loss:.4f}, Train Accuracy: {train_acc:.4f}, LR: {lr:.6f}")
+        log_train(train_loss, train_acc, lr)
+        writer.add_scalar("train/loss", train_loss, epoch)
+        writer.add_scalar("train/accuracy", train_acc, epoch)
+        writer.add_scalar("train/lr", lr, epoch)
+
         logger.info(f"Epoch {epoch}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
         log_val(val_loss, val_acc)
+        writer.add_scalar("val/loss", val_loss, epoch)
+        writer.add_scalar("val/accuracy", val_acc, epoch)
+        
+        # Save GradCAM visualization if visualize is enabled
+        if visualize and epoch % 10 == 0:  # Save every 10 epochs to avoid too many images
+            # Get a sample image from validation set
+            with torch.no_grad():
+                sample_images, sample_labels = next(iter(val_loader))
+                sample_img = sample_images[0].to(device)
+                sample_label = sample_labels[0].item()
+                
+                # Ensure the directory exists
+                os.makedirs(gradcam_dir, exist_ok=True)
+                
+                # Save GradCAM visualization
+                save_cam(model, sample_img, sample_label, epoch, Path(gradcam_dir))
 
 def test_model(model, test_loader, device, visualize=False, save_model=False):
     model.to(device)
@@ -86,6 +126,7 @@ def test_model(model, test_loader, device, visualize=False, save_model=False):
     
     accuracy = correct / total
     logger.info(f"Test Accuracy: {accuracy:.4f}")
+    writer.add_scalar("test/accuracy", accuracy)
     
     if save_model:
         torch.save(model.state_dict(), f"{model.name}.pth")
