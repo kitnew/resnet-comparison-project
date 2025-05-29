@@ -45,26 +45,6 @@ def create_data_loaders(batch_size=32, num_workers=4):
     dataset_path = Path(dataset_path)
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset path {dataset_path} does not exist")
-        
-    # The dataset directory should contain subdirectories for each class
-    valid_dir = dataset_path
-    
-    # Check if the dataset has the expected structure (subdirectories for classes)
-    class_dirs = [d for d in os.listdir(valid_dir) if os.path.isdir(os.path.join(valid_dir, d))]
-    if not class_dirs:
-        logger.error(f"No class subdirectories found in {valid_dir}")
-        raise ValueError(f"Dataset at {valid_dir} has no class subdirectories")
-    
-    # Log information about the dataset structure
-    logger.info(f"Found {len(class_dirs)} classes in the dataset at {valid_dir}")
-    
-    # Log sample counts for a few classes
-    for cls in class_dirs[:5]:  # Show info for first 5 classes
-        cls_path = os.path.join(valid_dir, cls)
-        img_count = len([f for f in os.listdir(cls_path) if os.path.isfile(os.path.join(cls_path, f))])
-        logger.info(f"Class '{cls}' has {img_count} images")
-        
-    logger.info(f"Using dataset directory: {valid_dir}")
     
     # Define transformations for ImageNet
     train_transform = v2.Compose([
@@ -75,14 +55,14 @@ def create_data_loaders(batch_size=32, num_workers=4):
     ])
     
     val_test_transform = v2.Compose([
-        v2.Resize(256),
+        v2.Resize(224),
         v2.CenterCrop(224),
         v2.ToTensor(),
         v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     
     # Create full dataset with the valid directory
-    full_dataset = ImageNetDataset(valid_dir, transform=None)
+    full_dataset = ImageNetDataset(dataset_path, transform=None)
     logger.info(f"Created dataset with {len(full_dataset)} samples")
     
     if len(full_dataset) == 0:
