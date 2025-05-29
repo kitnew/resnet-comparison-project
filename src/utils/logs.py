@@ -19,5 +19,9 @@ def log_train(loss, accuracy, lr):
     log["train_accuracy"].append(accuracy)
     log["lr"].append(lr)
 
+def log_val(loss, accuracy):
+    log["val_loss"].append(loss)
+    log["val_accuracy"].append(accuracy)
+
 def end_log():
     log["end_time"] = time.strftime("%Y-%m-%d_%H-%M-%S")

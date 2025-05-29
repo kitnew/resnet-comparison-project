@@ -50,14 +50,14 @@ def create_data_loaders(batch_size=32, num_workers=4):
     train_transform = v2.Compose([
         v2.RandomResizedCrop(224),
         v2.RandomHorizontalFlip(),
-        v2.ToTensor(),
+        v2.ToDtype(torch.float32, scale=True    ),
         v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     
     val_test_transform = v2.Compose([
         v2.Resize(224),
         v2.CenterCrop(224),
-        v2.ToTensor(),
+        v2.ToDtype(torch.float32, scale=True),
         v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     

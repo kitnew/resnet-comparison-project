@@ -3,12 +3,16 @@ import torch.nn as nn
 from models.resnet import resnet101, resnet152
 from models.model import ResNet
 from utils.data_loader import create_data_loaders
-from utils.logs import init_log, log_train, end_log
+from utils.logs import init_log, log_train, log_val, end_log
 
 import argparse
 import os
 import time
 import tqdm
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 results_dir = os.path.join(project_dir, "results")
@@ -34,6 +38,15 @@ def train_model(model, train_loader, val_loader, device, visualize=False, save_m
             loss.backward()
             optimizer.step()
 
+            train_loss += loss.item()
+            train_acc += (outputs.argmax(dim=1) == labels).sum().item()
+
+        train_loss = train_loss / len(train_loader)
+        train_acc = train_acc / len(train_loader.dataset)
+        lr = optimizer.param_groups[0]["lr"]
+
+        logger.info(f"Epoch {epoch}, Train Loss: {train_loss:.4f}, Train Accuracy: {train_acc:.4f}, LR: {lr:.6f}")
+        log_train(train_loss, train_acc, lr)
 
 
         lr_scheduler.step()
@@ -43,6 +56,15 @@ def train_model(model, train_loader, val_loader, device, visualize=False, save_m
             images, labels = images.to(device), labels.to(device)
             outputs = model(images)
             loss = criterion(outputs, labels)
+
+            val_loss += loss.item()
+            val_acc += (outputs.argmax(dim=1) == labels).sum().item()
+
+        val_loss = val_loss / len(val_loader)
+        val_acc = val_acc / len(val_loader.dataset)
+
+        logger.info(f"Epoch {epoch}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
+        log_val(val_loss, val_acc)
 
 def test_model(model, test_loader, device, visualize=False, save_model=False):
     model.to(device)
@@ -59,7 +81,7 @@ def test_model(model, test_loader, device, visualize=False, save_model=False):
             correct += (predicted == labels).sum().item()
     
     accuracy = correct / total
-    print(f"Test Accuracy: {accuracy:.4f}")
+    logger.info(f"Test Accuracy: {accuracy:.4f}")
     
     if save_model:
         torch.save(model.state_dict(), f"{model.name}.pth")
