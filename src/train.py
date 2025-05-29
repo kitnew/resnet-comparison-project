@@ -85,13 +85,13 @@ def train_model(model, train_loader, val_loader, device, visualize=False, save_m
         val_loss = current_val_loss / len(val_loader)
         val_acc = current_val_acc / len(val_loader.dataset)
 
-        logger.info(f"Epoch {epoch}, Train Loss: {train_loss:.4f}, Train Accuracy: {train_acc:.4f}, LR: {lr:.6f}")
+        print(f"Epoch {epoch}, Train Loss: {train_loss:.4f}, Train Accuracy: {train_acc:.4f}, LR: {lr:.6f}")
         log_train(train_loss, train_acc, lr)
         writer.add_scalar("train/loss", train_loss, epoch)
         writer.add_scalar("train/accuracy", train_acc, epoch)
         writer.add_scalar("train/lr", lr, epoch)
 
-        logger.info(f"Epoch {epoch}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
+        print(f"Epoch {epoch}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
         log_val(val_loss, val_acc)
         writer.add_scalar("val/loss", val_loss, epoch)
         writer.add_scalar("val/accuracy", val_acc, epoch)
@@ -125,7 +125,7 @@ def test_model(model, test_loader, device, visualize=False, save_model=False):
             correct += (predicted == labels).sum().item()
     
     accuracy = correct / total
-    logger.info(f"Test Accuracy: {accuracy:.4f}")
+    print(f"Test Accuracy: {accuracy:.4f}")
     writer.add_scalar("test/accuracy", accuracy)
     
     if save_model:
