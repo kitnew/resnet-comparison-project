@@ -40,23 +40,24 @@ def create_data_loaders(batch_size=32, num_workers=4):
         
     # Find the actual image directory - often datasets are nested
     # Look for directories that might contain the actual images
-    #potential_dirs = [dataset_path]
-    #for subdir in dataset_path.glob('**/*'):
-    #    if subdir.is_dir() and any(f.is_file() for f in subdir.glob('*')):
-    #        potential_dirs.append(subdir)
-    #
-    ## Try each directory until we find one with images
-    #valid_dir = None
-    #for dir_path in potential_dirs:
-    #    try:
-    #        image_files = [f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f))]
-    #        if image_files:
-    #            valid_dir = dir_path
-    #            logger.info(f"Found {len(image_files)} images in {valid_dir}")
-    #            break
-    #    except Exception as e:
-    #        logger.warning(f"Error checking directory {dir_path}: {e}")
+    potential_dirs = [dataset_path]
+    for subdir in dataset_path.glob('**/*'):
+        if subdir.is_dir() and any(f.is_file() for f in subdir.glob('*')):
+            potential_dirs.append(subdir)
     
+    # Try each directory until we find one with images
+    valid_dir = None
+    for dir_path in potential_dirs:
+        try:
+            image_files = [f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f))]
+            if image_files:
+                valid_dir = dir_path
+                logger.info(f"Found {len(image_files)} images in {valid_dir}")
+                break
+        except Exception as e:
+            logger.warning(f"Error checking directory {dir_path}: {e}")
+    
+    logger.info(f"Using directory {valid_dir} for dataset")
     
     # Define transformations for ImageNet
     train_transform = v2.Compose([
@@ -74,7 +75,7 @@ def create_data_loaders(batch_size=32, num_workers=4):
     ])
     
     # Create full dataset with the valid directory
-    full_dataset = ImageNetDataset(dataset_path, transform=None)
+    full_dataset = ImageNetDataset(valid_dir, transform=None)
     logger.info(f"Created dataset with {len(full_dataset)} samples")
     
     if len(full_dataset) == 0:
