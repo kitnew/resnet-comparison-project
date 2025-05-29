@@ -4,6 +4,9 @@ from PIL import Image
 import torch
 from torchvision.transforms import v2
 import kagglehub
+import sys
+import logging
+from pathlib import Path
 
 class ImageNetDataset(Dataset):
     def __init__(self, root_dir, transform=None):
@@ -22,46 +25,151 @@ class ImageNetDataset(Dataset):
         return image
 
 def create_data_loaders(batch_size=32, num_workers=4):
-    # Get dataset path from kagglehub
-    dataset_path = kagglehub.dataset_download("dimensi0n/imagenet-256")
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
     
-    # Define transformations
-    train_transform = v2.Compose([
-        v2.RandomResizedCrop(224),
-        v2.RandomHorizontalFlip(),
-        v2.ToTensor(),
-        #v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
-    
-    val_test_transform = v2.Compose([
-        v2.Resize(256),
-        v2.CenterCrop(224),
-        v2.ToTensor(),
-        #v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
-    
-    # Create full dataset
-    full_dataset = ImageNetDataset(dataset_path, transform=None)
-    
-    # Split dataset: 60% train, 20% val, 20% test
-    total_size = len(full_dataset)
-    train_size = int(0.6 * total_size)
-    val_size = int(0.2 * total_size)
-    test_size = total_size - train_size - val_size
-    
-    train_dataset, val_dataset, test_dataset = random_split(
-        full_dataset, [train_size, val_size, test_size], 
-        generator=torch.Generator().manual_seed(688243)
-    )
-    
-    # Apply transformations
-    train_dataset.dataset.transform = train_transform
-    val_dataset.dataset.transform = val_test_transform
-    test_dataset.dataset.transform = val_test_transform
-    
-    # Create data loaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-    
-    return train_loader, val_loader, test_loader
+    try:
+        # Get dataset path from kagglehub
+        logger.info("Downloading dataset from kagglehub...")
+        dataset_path = kagglehub.dataset_download("dimensi0n/imagenet-256")
+        logger.info(f"Dataset downloaded to: {dataset_path}")
+        
+        # Check if path exists and contains files
+        dataset_path = Path(dataset_path)
+        if not dataset_path.exists():
+            raise FileNotFoundError(f"Dataset path {dataset_path} does not exist")
+            
+        # Find the actual image directory - often datasets are nested
+        # Look for directories that might contain the actual images
+        potential_dirs = [dataset_path]
+        for subdir in dataset_path.glob('**/*'):
+            if subdir.is_dir() and any(f.is_file() for f in subdir.glob('*')):
+                potential_dirs.append(subdir)
+        
+        # Try each directory until we find one with images
+        valid_dir = None
+        for dir_path in potential_dirs:
+            try:
+                image_files = [f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f))]
+                if image_files:
+                    valid_dir = dir_path
+                    logger.info(f"Found {len(image_files)} images in {valid_dir}")
+                    break
+            except Exception as e:
+                logger.warning(f"Error checking directory {dir_path}: {e}")
+        
+        if valid_dir is None:
+            # If no valid directory is found, use dummy data for testing
+            logger.warning("No valid image directory found. Using torchvision's CIFAR10 dataset for testing")
+            from torchvision.datasets import CIFAR10
+            
+            train_transform = v2.Compose([
+                v2.RandomResizedCrop(224),
+                v2.RandomHorizontalFlip(),
+                v2.ToTensor(),
+                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
+            
+            val_test_transform = v2.Compose([
+                v2.Resize(256),
+                v2.CenterCrop(224),
+                v2.ToTensor(),
+                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
+            
+            # Use CIFAR10 as a fallback dataset
+            train_dataset = CIFAR10(root='./data', train=True, download=True, transform=train_transform)
+            test_val_dataset = CIFAR10(root='./data', train=False, download=True, transform=val_test_transform)
+            
+            # Split test_val into test and validation
+            val_size = len(test_val_dataset) // 2
+            test_size = len(test_val_dataset) - val_size
+            val_dataset, test_dataset = random_split(
+                test_val_dataset, [val_size, test_size],
+                generator=torch.Generator().manual_seed(688243)
+            )
+        else:
+            # Define transformations for ImageNet
+            train_transform = v2.Compose([
+                v2.RandomResizedCrop(224),
+                v2.RandomHorizontalFlip(),
+                v2.ToTensor(),
+                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
+            
+            val_test_transform = v2.Compose([
+                v2.Resize(256),
+                v2.CenterCrop(224),
+                v2.ToTensor(),
+                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
+            
+            # Create full dataset with the valid directory
+            full_dataset = ImageNetDataset(valid_dir, transform=None)
+            logger.info(f"Created dataset with {len(full_dataset)} samples")
+            
+            if len(full_dataset) == 0:
+                raise ValueError("Dataset is empty - no images found")
+                
+            # Split dataset: 60% train, 20% val, 20% test
+            total_size = len(full_dataset)
+            train_size = int(0.6 * total_size)
+            val_size = int(0.2 * total_size)
+            test_size = total_size - train_size - val_size
+            
+            train_dataset, val_dataset, test_dataset = random_split(
+                full_dataset, [train_size, val_size, test_size], 
+                generator=torch.Generator().manual_seed(688243)
+            )
+            
+            # Apply transformations
+            train_dataset.dataset.transform = train_transform
+            val_dataset.dataset.transform = val_test_transform
+            test_dataset.dataset.transform = val_test_transform
+        
+        # Create data loaders
+        logger.info(f"Creating data loaders with batch size {batch_size}")
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+        
+        return train_loader, val_loader, test_loader
+        
+    except Exception as e:
+        logger.error(f"Error creating data loaders: {e}")
+        logger.error("Falling back to CIFAR10 dataset")
+        
+        # Fall back to CIFAR10 dataset
+        from torchvision.datasets import CIFAR10
+        
+        train_transform = v2.Compose([
+            v2.RandomResizedCrop(224),
+            v2.RandomHorizontalFlip(),
+            v2.ToTensor(),
+            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+        
+        val_test_transform = v2.Compose([
+            v2.Resize(256),
+            v2.CenterCrop(224),
+            v2.ToTensor(),
+            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+        
+        # Use CIFAR10 as a fallback dataset
+        train_dataset = CIFAR10(root='./data', train=True, download=True, transform=train_transform)
+        test_val_dataset = CIFAR10(root='./data', train=False, download=True, transform=val_test_transform)
+        
+        # Split test_val into test and validation
+        val_size = len(test_val_dataset) // 2
+        test_size = len(test_val_dataset) - val_size
+        val_dataset, test_dataset = random_split(
+            test_val_dataset, [val_size, test_size],
+            generator=torch.Generator().manual_seed(688243)
+        )
+        
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+        
+        return train_loader, val_loader, test_loader

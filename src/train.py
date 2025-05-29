@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 from models.resnet import resnet101, resnet152
 from models.model import ResNet
 from utils.data_loader import create_data_loaders
