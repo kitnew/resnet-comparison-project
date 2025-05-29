@@ -9,4 +9,4 @@
 #SBATCH --time=24:00:00
 
 source .venv/bin/activate
-python train.py --model resnet101
+python src/train.py --model resnet101
