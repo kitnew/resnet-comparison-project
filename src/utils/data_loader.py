@@ -12,17 +12,25 @@ class ImageNetDataset(Dataset):
     def __init__(self, root_dir, transform=None):
         self.root_dir = root_dir
         self.transform = transform
-        self.samples = [f for f in os.listdir(root_dir) if os.path.isfile(os.path.join(root_dir, f))]
-
+        self.classes = sorted([d for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))])
+        self.class_to_idx = {cls_name: i for i, cls_name in enumerate(self.classes)}
+        
+        self.samples = []
+        for class_name in self.classes:
+            class_dir = os.path.join(root_dir, class_name)
+            for img_name in os.listdir(class_dir):
+                if os.path.isfile(os.path.join(class_dir, img_name)):
+                    self.samples.append((os.path.join(class_dir, img_name), self.class_to_idx[class_name]))
+        
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        img_path = os.path.join(self.root_dir, self.samples[idx])
+        img_path, label = self.samples[idx]
         image = Image.open(img_path).convert('RGB')
         if self.transform:
             image = self.transform(image)
-        return image
+        return image, label
 
 def create_data_loaders(batch_size=32, num_workers=4):
     logging.basicConfig(level=logging.INFO)
@@ -38,26 +46,25 @@ def create_data_loaders(batch_size=32, num_workers=4):
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset path {dataset_path} does not exist")
         
-    # Find the actual image directory - often datasets are nested
-    # Look for directories that might contain the actual images
-    potential_dirs = [dataset_path]
-    for subdir in dataset_path.glob('**/*'):
-        if subdir.is_dir() and any(f.is_file() for f in subdir.glob('*')):
-            potential_dirs.append(subdir)
+    # The dataset directory should contain subdirectories for each class
+    valid_dir = dataset_path
     
-    # Try each directory until we find one with images
-    valid_dir = None
-    for dir_path in potential_dirs:
-        try:
-            image_files = [f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f))]
-            if image_files:
-                valid_dir = dir_path
-                logger.info(f"Found {len(image_files)} images in {valid_dir}")
-                break
-        except Exception as e:
-            logger.warning(f"Error checking directory {dir_path}: {e}")
+    # Check if the dataset has the expected structure (subdirectories for classes)
+    class_dirs = [d for d in os.listdir(valid_dir) if os.path.isdir(os.path.join(valid_dir, d))]
+    if not class_dirs:
+        logger.error(f"No class subdirectories found in {valid_dir}")
+        raise ValueError(f"Dataset at {valid_dir} has no class subdirectories")
     
-    logger.info(f"Using directory {valid_dir} for dataset")
+    # Log information about the dataset structure
+    logger.info(f"Found {len(class_dirs)} classes in the dataset at {valid_dir}")
+    
+    # Log sample counts for a few classes
+    for cls in class_dirs[:5]:  # Show info for first 5 classes
+        cls_path = os.path.join(valid_dir, cls)
+        img_count = len([f for f in os.listdir(cls_path) if os.path.isfile(os.path.join(cls_path, f))])
+        logger.info(f"Class '{cls}' has {img_count} images")
+        
+    logger.info(f"Using dataset directory: {valid_dir}")
     
     # Define transformations for ImageNet
     train_transform = v2.Compose([
@@ -102,5 +109,5 @@ def create_data_loaders(batch_size=32, num_workers=4):
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-    
+
     return train_loader, val_loader, test_loader
