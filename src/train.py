@@ -38,11 +38,11 @@ def train_model(model, train_loader, val_loader, device, visualize=False, save_m
             loss.backward()
             optimizer.step()
 
-            train_loss += loss.item()
-            train_acc += (outputs.argmax(dim=1) == labels).sum().item()
+            current_loss += loss.item()
+            current_acc += (outputs.argmax(dim=1) == labels).sum().item()
 
-        train_loss = train_loss / len(train_loader)
-        train_acc = train_acc / len(train_loader.dataset)
+        train_loss = current_loss / len(train_loader)
+        train_acc = current_acc / len(train_loader.dataset)
         lr = optimizer.param_groups[0]["lr"]
 
         logger.info(f"Epoch {epoch}, Train Loss: {train_loss:.4f}, Train Accuracy: {train_acc:.4f}, LR: {lr:.6f}")
@@ -57,11 +57,11 @@ def train_model(model, train_loader, val_loader, device, visualize=False, save_m
             outputs = model(images)
             loss = criterion(outputs, labels)
 
-            val_loss += loss.item()
-            val_acc += (outputs.argmax(dim=1) == labels).sum().item()
+            current_val_loss += loss.item()
+            current_val_acc += (outputs.argmax(dim=1) == labels).sum().item()
 
-        val_loss = val_loss / len(val_loader)
-        val_acc = val_acc / len(val_loader.dataset)
+        val_loss = current_val_loss / len(val_loader)
+        val_acc = current_val_acc / len(val_loader.dataset)
 
         logger.info(f"Epoch {epoch}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
         log_val(val_loss, val_acc)
