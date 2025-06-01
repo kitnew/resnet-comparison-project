@@ -172,3 +172,12 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Checkpoints
+*.pth
+
+# Tensorboard logs
+events.out*
+
+# Figures
+figures
