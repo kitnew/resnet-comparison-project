@@ -1,4 +1,4 @@
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import DataLoader, Dataset, random_split, RandomSampler
 import os
 from PIL import Image
 import torch
@@ -7,6 +7,7 @@ import kagglehub
 import sys
 import logging
 from pathlib import Path
+import numpy as np
 
 class ImageNetDataset(Dataset):
     def __init__(self, root_dir, transform=None):
@@ -32,7 +33,38 @@ class ImageNetDataset(Dataset):
             image = self.transform(image)
         return image, label
 
-def create_data_loaders(batch_size=96, num_workers=8):
+class ClassBalancedLoss:
+    """
+    Class-balanced loss function for handling imbalanced datasets.
+    Implementation based on the paper "Class-Balanced Loss Based on Effective Number of Samples"
+    https://arxiv.org/abs/1901.05555
+    """
+    def __init__(self, class_counts, beta=0.9999, loss_type='cross_entropy'):
+        """
+        Initialize the class-balanced loss.
+        
+        Args:
+            class_counts: List containing count of samples for each class
+            beta: Hyperparameter for class-balanced loss (default: 0.9999)
+            loss_type: Base loss function type (default: 'cross_entropy')
+        """
+        self.class_counts = class_counts
+        self.beta = beta
+        self.loss_type = loss_type
+        
+        # Calculate effective number of samples
+        effective_num = 1.0 - np.power(self.beta, class_counts)
+        
+        # Calculate weights for each class
+        self.class_weights = (1.0 - self.beta) / np.array(effective_num)
+        self.class_weights = self.class_weights / np.sum(self.class_weights) * len(class_counts)
+        self.class_weights = torch.tensor(self.class_weights, dtype=torch.float32)
+    
+    def get_class_weights(self):
+        """Return the class weights tensor."""
+        return self.class_weights
+
+def create_data_loaders(batch_size=96, num_workers=8, use_class_balancing=True):
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
     
@@ -48,12 +80,16 @@ def create_data_loaders(batch_size=96, num_workers=8):
     
     # Define transformations for ImageNet
     train_transform = v2.Compose([
-        v2.RandomResizedCrop(224),
+        v2.RandomResizedCrop(224, scale=(0.08, 1.0)),
         v2.RandomHorizontalFlip(),
         v2.RandomAffine(degrees=0, translate=(0.1, 0.1)),
+        v2.MixUp(alpha=0.2),
+        v2.CutMix(alpha=1.0),
+        v2.AutoAugment(policy=v2.AutoAugmentPolicy.IMAGENET),
         v2.ToImage(),
         v2.ToDtype(torch.float32, scale=True),
-        v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        v2.RandomErasing(p=0.25, scale=(0.02, 0.2))
     ])
     
     val_test_transform = v2.Compose([
@@ -89,8 +125,37 @@ def create_data_loaders(batch_size=96, num_workers=8):
     
     # Create data loaders
     logger.info(f"Creating data loaders with batch size {batch_size}")
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    
+    # Calculate class counts for class-balanced loss
+    class_counts = [0] * len(full_dataset.class_to_idx)
+    for _, label in full_dataset.samples:
+        class_counts[label] += 1
+    
+    class_balancer = None
+    if use_class_balancing:
+        # Instead of WeightedRandomSampler, use RandomSampler and class-balanced loss
+        logger.info("Using RandomSampler with class-balanced loss for training data")
+        class_balancer = ClassBalancedLoss(class_counts)
+        
+        # Use RandomSampler for the training loader
+        train_sampler = RandomSampler(train_dataset)
+        train_loader = DataLoader(
+            train_dataset, 
+            batch_size=batch_size, 
+            sampler=train_sampler,
+            num_workers=num_workers
+        )
+    else:
+        # Use regular random sampling
+        train_loader = DataLoader(
+            train_dataset, 
+            batch_size=batch_size, 
+            shuffle=True, 
+            num_workers=num_workers
+        )
+    
+    # Validation and test loaders (no need for class balancing here)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
-    return train_loader, val_loader, test_loader
+    return train_loader, val_loader, test_loader, class_balancer
