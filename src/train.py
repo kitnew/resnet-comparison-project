@@ -36,7 +36,7 @@ start_time = time.strftime("%Y-%m-%d_%H-%M-%S")
 
 writer = None
 
-train_loader, val_loader, test_loader = create_data_loaders()
+train_loader, val_loader, test_loader, class_balancer = create_data_loaders()
 model: ResNet = None
 
 def save_cam(model, img, label, epoch, folder):
@@ -102,14 +102,19 @@ def save_cam(model, img, label, epoch, folder):
 
 def train_model(model, train_loader, val_loader, device, visualize=False, save_model=False):
     model.to(device)
+
+    batch_size = 96
     
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=1e-4)
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.1, patience=4)
-    
+    criterion = nn.CrossEntropyLoss(weight=class_balancer.get_class_weights().to(device), label_smoothing=0.1)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1*(batch_size/256), momentum=0.9, weight_decay=2e-4)
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=150, eta_min=0.1*(batch_size/256)*1e-6)
+    warmup_epochs = 5
+    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+                    optimizer, start_factor=0.1, total_iters=warmup_epochs)
+
     best_val_acc = 0.0  # Track best validation accuracy
 
-    for epoch in range(90):
+    for epoch in range(150):
         model.train()
         current_loss = 0
         current_acc = 0
@@ -126,7 +131,7 @@ def train_model(model, train_loader, val_loader, device, visualize=False, save_m
 
         train_loss = current_loss / len(train_loader)
         train_acc = current_acc / len(train_loader.dataset)
-        lr = optimizer.param_groups[0]["lr"]
+        lr = optimizer.param_groups[0]['lr']
 
         model.eval()
         current_val_loss = 0
@@ -142,7 +147,11 @@ def train_model(model, train_loader, val_loader, device, visualize=False, save_m
         val_loss = current_val_loss / len(val_loader)
         val_acc = current_val_acc / len(val_loader.dataset)
 
-        lr_scheduler.step(val_acc)
+        if epoch > warmup_epochs:
+            lr_scheduler.step()
+        else:
+            lr_scheduler.step()
+            warmup_scheduler.step()
 
         print(f"Epoch {epoch}, Train Loss: {train_loss:.4f}, Train Accuracy: {train_acc:.4f}, LR: {lr:.6f}")
         log_train(train_loss, train_acc, lr)
@@ -163,25 +172,26 @@ def train_model(model, train_loader, val_loader, device, visualize=False, save_m
         if visualize and epoch % 10 == 0:  # Save every 10 epochs to avoid too many images
             # Get a sample image from validation set
             with torch.no_grad():
-                sample_images, sample_labels = next(iter(val_loader))
-                sample_img = sample_images[0].to(device)
-                sample_label = sample_labels[0].item()
-                
                 # Ensure directories exist
                 os.makedirs(gradcam_dir, exist_ok=True)
                 os.makedirs(feature_maps_dir, exist_ok=True)
+
+                for i in range(8):
+                    sample_images, sample_labels = next(iter(val_loader))
+                    sample_img = sample_images[i].to(device)
+                    sample_label = sample_labels[i].item()
                 
-                # Save standard GradCAM visualization for the last layer
-                save_cam(model, sample_img, sample_label, epoch, Path(gradcam_dir))
+                if i <= 1:
+                    # Save standard GradCAM visualization for the last layer
+                    save_cam(model, sample_img, sample_label, epoch, Path(gradcam_dir))
                 
                 # Save comprehensive feature maps for all layers
-                for i in range(1, 9):
-                    image_dir = os.path.join(feature_maps_dir, f"picture{i}")
-                    os.makedirs(image_dir, exist_ok=True)
-                    save_feature_maps(model, sample_img, sample_label, epoch, image_dir, writer)
+                image_dir = os.path.join(feature_maps_dir, f"picture{i}")
+                os.makedirs(image_dir, exist_ok=True)
+                save_feature_maps(model, sample_img, sample_label, epoch, image_dir, writer)
 
         # Final checkpoint at the end of training if save_model is enabled
-        if save_model and epoch == 89:  # Last epoch
+        if save_model and epoch == 150:  # Last epoch
             final_path = os.path.join(checkpoints_dir, f"{model.name}_final.pth")
             torch.save({
                 'epoch': epoch,
