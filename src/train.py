@@ -36,7 +36,7 @@ start_time = time.strftime("%Y-%m-%d_%H-%M-%S")
 
 writer = None
 
-train_loader, val_loader, test_loader = create_data_loaders()
+train_loader, val_loader, test_loader, class_balancer = create_data_loaders()
 model: ResNet = None
 
 def save_cam(model, img, label, epoch, folder):
@@ -102,14 +102,19 @@ def save_cam(model, img, label, epoch, folder):
 
 def train_model(model, train_loader, val_loader, device, visualize=False, save_model=False):
     model.to(device)
+
+    batch_size = 96
     
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=1e-4)
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.1, patience=4)
-    
+    criterion = nn.CrossEntropyLoss(weight=class_balancer.get_class_weights().to(device), label_smoothing=0.1)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1*(batch_size/256), momentum=0.9, weight_decay=2e-4)
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=150, eta_min=0.1*(batch_size/256)*1e-6)
+    warmup_epochs = 5
+    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+                    optimizer, start_factor=0.1, total_iters=warmup_epochs)
+
     best_val_acc = 0.0  # Track best validation accuracy
 
-    for epoch in range(90):
+    for epoch in range(150):
         model.train()
         current_loss = 0
         current_acc = 0
@@ -126,7 +131,7 @@ def train_model(model, train_loader, val_loader, device, visualize=False, save_m
 
         train_loss = current_loss / len(train_loader)
         train_acc = current_acc / len(train_loader.dataset)
-        lr = optimizer.param_groups[0]["lr"]
+        lr = optimizer.param_groups[0]['lr']
 
         model.eval()
         current_val_loss = 0
@@ -142,7 +147,11 @@ def train_model(model, train_loader, val_loader, device, visualize=False, save_m
         val_loss = current_val_loss / len(val_loader)
         val_acc = current_val_acc / len(val_loader.dataset)
 
-        lr_scheduler.step(val_acc)
+        if epoch > warmup_epochs:
+            lr_scheduler.step()
+        else:
+            lr_scheduler.step()
+            warmup_scheduler.step()
 
         print(f"Epoch {epoch}, Train Loss: {train_loss:.4f}, Train Accuracy: {train_acc:.4f}, LR: {lr:.6f}")
         log_train(train_loss, train_acc, lr)
@@ -163,25 +172,27 @@ def train_model(model, train_loader, val_loader, device, visualize=False, save_m
         if visualize and epoch % 10 == 0:  # Save every 10 epochs to avoid too many images
             # Get a sample image from validation set
             with torch.no_grad():
-                sample_images, sample_labels = next(iter(val_loader))
-                sample_img = sample_images[0].to(device)
-                sample_label = sample_labels[0].item()
-                
                 # Ensure directories exist
                 os.makedirs(gradcam_dir, exist_ok=True)
                 os.makedirs(feature_maps_dir, exist_ok=True)
+                os.makedirs(os.path.join(gradcam_dir, "training"), exist_ok=True)
+
+                for i in range(8):
+                    sample_images, sample_labels = next(iter(val_loader))
+                    sample_img = sample_images[i].to(device)
+                    sample_label = sample_labels[i].item()
                 
-                # Save standard GradCAM visualization for the last layer
-                save_cam(model, sample_img, sample_label, epoch, Path(gradcam_dir))
+                    if i == 0:
+                        # Save standard GradCAM visualization for the last layer
+                        save_cam(model, sample_img, sample_label, epoch, Path(os.path.join(gradcam_dir, "training")))
                 
-                # Save comprehensive feature maps for all layers
-                for i in range(1, 9):
-                    image_dir = os.path.join(feature_maps_dir, f"picture{i}")
+                    # Save comprehensive feature maps for all layers
+                    image_dir = os.path.join(feature_maps_dir, "training", f"picture{i}")
                     os.makedirs(image_dir, exist_ok=True)
                     save_feature_maps(model, sample_img, sample_label, epoch, image_dir, writer)
 
         # Final checkpoint at the end of training if save_model is enabled
-        if save_model and epoch == 89:  # Last epoch
+        if save_model and epoch == 150:  # Last epoch
             final_path = os.path.join(checkpoints_dir, f"{model.name}_final.pth")
             torch.save({
                 'epoch': epoch,
@@ -195,9 +206,13 @@ def train_model(model, train_loader, val_loader, device, visualize=False, save_m
             }, final_path)
             logger.info(f"Final model saved at {final_path}")
 
-def test_model(model, test_loader, device, visualize=False, save_model=False):
+def test_model(model, test_loader, device, classes, visualize=False, save_model=False):
     model.to(device)
     model.eval()
+    
+    all_preds = []
+    all_probs = []
+    all_labels = []
     
     correct = 0
     total = 0
@@ -205,19 +220,60 @@ def test_model(model, test_loader, device, visualize=False, save_model=False):
         for images, labels in tqdm.tqdm(test_loader, desc="Testing"):
             images, labels = images.to(device), labels.to(device)
             outputs = model(images)
+            
+            # Apply softmax to get probabilities
+            probs = torch.softmax(outputs, dim=1)
+            
+            # Get predictions
             _, predicted = torch.max(outputs.data, 1)
+            
+            # Store for visualization
+            all_preds.append(predicted.cpu())
+            all_probs.append(probs.cpu())
+            all_labels.append(labels.cpu())
+            
+            # Calculate accuracy
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
     
+    # Convert lists to tensors
+    all_preds = torch.cat(all_preds)
+    all_probs = torch.cat(all_probs)
+    all_labels = torch.cat(all_labels)
+    
+    # Calculate overall accuracy
     accuracy = correct / total
     print(f"Test Accuracy: {accuracy:.4f}")
     writer.add_scalar("test/accuracy", accuracy)
+    
+    if visualize:
+        # Convert tensors to numpy arrays for visualization
+        y_pred = all_preds.numpy()
+        y_true = all_labels.numpy()
+        y_score = all_probs.numpy()
+        
+        # Call visualization functions
+        from utils.visualization import (
+            plot_confusion, plot_roc_curves, plot_precision_recall_curves,
+            plot_top_k_accuracy, plot_per_class_metrics, plot_confidence_histogram,
+            plot_sorted_confusion_matrix
+        )
+        
+        plot_confusion(y_true, y_pred, classes, figures_dir)
+        plot_top_k_accuracy(y_score, y_true, figures_dir)
+        plot_per_class_metrics(y_true, y_pred, classes, figures_dir)
+        plot_roc_curves(y_true, y_score, classes, "test", figures_dir)
+        plot_precision_recall_curves(y_true, y_score, classes, figures_dir)
+        plot_confidence_histogram(y_score, y_true, y_pred, figures_dir)
+        plot_sorted_confusion_matrix(y_true, y_pred, classes, figures_dir)
     
     # Final checkpoint at the end of training if save_model is enabled
     if save_model:
         final_path = os.path.join(checkpoints_dir, f"{model.name}_tested.pth")
         torch.save(model.state_dict(), final_path)
         logger.info(f"Final model saved at {final_path}")
+        
+    return accuracy, all_preds.numpy(), all_probs.numpy(), all_labels.numpy()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ResNet training script")
@@ -280,8 +336,13 @@ if __name__ == "__main__":
         
         # Initialize TensorBoard writer
         writer = SummaryWriter(log_dir=str(logs_dir))
+        
+        # Get class names from the dataset
+        # We need to access the original dataset through the test_dataset's dataset attribute
+        classes = test_loader.dataset.dataset.classes
+        print(f"Found {len(classes)} classes in the dataset")
 
         # Now start the testing process
-        test_model(model, test_loader, args.device, args.visualize, args.save_model)
+        test_model(model, test_loader, args.device, classes, args.visualize, args.save_model)
         
     end_log(logs_dir)

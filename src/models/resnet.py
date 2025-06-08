@@ -7,7 +7,7 @@ def resnet101(pretrained=False, **kwargs):
     """
     model = ResNet("resnet101", [3, 4, 23, 3], **kwargs)
     if pretrained:
-        model.load_state_dict(torch.load("resnet101.pth"))
+        model.load_state_dict(torch.load("resnet101.pth")["model_state_dict"])
     return model
 
 
@@ -17,5 +17,5 @@ def resnet152(pretrained=False, **kwargs):
     """
     model = ResNet("resnet152", [3, 8, 36, 3], **kwargs)
     if pretrained:
-        model.load_state_dict(torch.load("resnet152.pth"))
+        model.load_state_dict(torch.load("resnet152.pth")["model_state_dict"])
     return model

@@ -1,11 +1,9 @@
 from pathlib import Path
-from torch.utils.tensorboard import SummaryWriter
 import torch
 from captum.attr import LayerGradCam
 import torchvision.transforms.functional as TF
 import matplotlib.pyplot as plt
 import numpy as np
-from itertools import cycle
 
 class FeatureMapVisualizer:
     """Class for extracting and visualizing feature maps from each layer of a ResNet model."""

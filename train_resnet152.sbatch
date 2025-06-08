@@ -4,10 +4,10 @@
 #SBATCH --error=results/resnet152/slurm_%j.err
 #SBATCH --open-mode=append
 #SBATCH --partition=dgx
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=128G
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 
 module load cuda/12.3
 module load python/3.12

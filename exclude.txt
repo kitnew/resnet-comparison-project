@@ -1,2 +1,7 @@
 .venv
 docs
+checkpoints
+.git
+exclude.txt
+notebooks
+__pycache__
